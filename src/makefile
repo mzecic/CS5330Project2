@@ -22,7 +22,7 @@ LDLIBS = -ltiff -lpng -ljpeg -llapack -lblas -lz -ljasper -lwebp -framework AVFo
 BINDIR = ../bin
 
 # rules for making various executables
-readfiles1: readfiles-1.cpp
+readfiles1: readfiles-1.o csv_util.o
 	$(CC) $^ -o $(BINDIR)/$@ $(LDFLAGS) $(LDLIBS)
 	install_name_tool -add_rpath /opt/homebrew/lib $(BINDIR)/$@
 

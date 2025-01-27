@@ -1,13 +1,68 @@
 /*
   Bruce A. Maxwell
   S21
-  
+
   Sample code to identify image fils in a directory
 */
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
 #include <dirent.h>
+#include "opencv2/opencv.hpp"
+#include <vector>
+#include "../include/csv_util.h"
+
+
+/**
+ * Extracts a 7x7 patch of pixel values from the center of an image.
+ *
+ * @param filename The path to the image file.
+ * @return A vector of float values representing the pixel data of the 7x7 patch.
+ *         If the image cannot be loaded or is too small, an empty vector is returned.
+ *
+ * The function performs the following steps:
+ * 1. Loads the image from the specified file.
+ * 2. Checks if the image was loaded successfully. If not, prints an error message and returns an empty vector.
+ * 3. Checks if the image dimensions are at least 7x7. If not, prints an error message and returns an empty vector.
+ * 4. Extracts a 7x7 patch of pixel values from the center of the image.
+ *    - If the image has 3 channels (e.g., RGB), extracts each channel value for each pixel.
+ *    - If the image has 1 channel (e.g., grayscale), extracts the pixel value.
+ *    - If the image has an unsupported number of channels, prints an error message and returns an empty vector.
+ * 5. Returns the vector of extracted pixel values.
+ */
+std::vector<float> extract_7x7(char *filename) {
+  cv::Mat image;
+  image = cv::imread(filename);
+  std::vector<float> image_data;
+
+  if (image.empty()) {
+        std::cerr << "Failed to load image: " << filename << std::endl;
+        return image_data; // Return empty vector
+  }
+
+  if (image.rows < 7 || image.cols < 7) {
+        std::cerr << "Image is too small for a 7x7 patch!" << std::endl;
+        return image_data; // Return empty vector
+  }
+
+  for (int i = (image.rows / 2) - 3; i <= (image.rows / 2) + 3; i++) {
+    for (int j = (image.rows / 2) - 3; j <= (image.rows / 2) + 3; j++) {
+      if (image.channels() == 3) {
+        for (int k = 0; k < 3; k++) {
+          image_data.push_back(image.at<cv::Vec3b>(i, j)[k]);
+        }
+      } else if (image.channels() == 1) {
+        image_data.push_back(image.at<uchar>(i, j));
+      } else {
+        std::cerr << "Image has an unsupported number of channels!" << std::endl;
+        return image_data;
+      }
+    }
+  }
+  return image_data;
+}
+
 
 /*
   Given a directory on the command line, scans through the directory for image files.
@@ -57,12 +112,12 @@ int main(int argc, char *argv[]) {
 
       printf("full path name: %s\n", buffer);
 
+      std::vector<float> patch = extract_7x7(buffer);
+      append_image_data_csv("../vectors/7x7_middle_patch.csv", buffer, patch);
     }
   }
-  
+
   printf("Terminating\n");
 
   return(0);
 }
-
-
