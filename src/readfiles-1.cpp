@@ -12,6 +12,7 @@
 #include "opencv2/opencv.hpp"
 #include <vector>
 #include "../include/csv_util.h"
+#include "../include/similarity_extraction.h"
 
 
 /**
@@ -31,37 +32,37 @@
  *    - If the image has an unsupported number of channels, prints an error message and returns an empty vector.
  * 5. Returns the vector of extracted pixel values.
  */
-std::vector<float> extract_7x7(char *filename) {
-  cv::Mat image;
-  image = cv::imread(filename);
-  std::vector<float> image_data;
+// std::vector<float> extract_7x7(char *filename) {
+//   cv::Mat image;
+//   image = cv::imread(filename);
+//   std::vector<float> image_data;
 
-  if (image.empty()) {
-        std::cerr << "Failed to load image: " << filename << std::endl;
-        return image_data; // Return empty vector
-  }
+//   if (image.empty()) {
+//         std::cerr << "Failed to load image: " << filename << std::endl;
+//         return image_data; // Return empty vector
+//   }
 
-  if (image.rows < 7 || image.cols < 7) {
-        std::cerr << "Image is too small for a 7x7 patch!" << std::endl;
-        return image_data; // Return empty vector
-  }
+//   if (image.rows < 7 || image.cols < 7) {
+//         std::cerr << "Image is too small for a 7x7 patch!" << std::endl;
+//         return image_data; // Return empty vector
+//   }
 
-  for (int i = (image.rows / 2) - 3; i <= (image.rows / 2) + 3; i++) {
-    for (int j = (image.rows / 2) - 3; j <= (image.rows / 2) + 3; j++) {
-      if (image.channels() == 3) {
-        for (int k = 0; k < 3; k++) {
-          image_data.push_back(image.at<cv::Vec3b>(i, j)[k]);
-        }
-      } else if (image.channels() == 1) {
-        image_data.push_back(image.at<uchar>(i, j));
-      } else {
-        std::cerr << "Image has an unsupported number of channels!" << std::endl;
-        return image_data;
-      }
-    }
-  }
-  return image_data;
-}
+//   for (int i = (image.rows / 2) - 3; i <= (image.rows / 2) + 3; i++) {
+//     for (int j = (image.rows / 2) - 3; j <= (image.rows / 2) + 3; j++) {
+//       if (image.channels() == 3) {
+//         for (int k = 0; k < 3; k++) {
+//           image_data.push_back(image.at<cv::Vec3b>(i, j)[k]);
+//         }
+//       } else if (image.channels() == 1) {
+//         image_data.push_back(image.at<uchar>(i, j));
+//       } else {
+//         std::cerr << "Image has an unsupported number of channels!" << std::endl;
+//         return image_data;
+//       }
+//     }
+//   }
+//   return image_data;
+// }
 
 
 /*
@@ -112,8 +113,24 @@ int main(int argc, char *argv[]) {
 
       printf("full path name: %s\n", buffer);
 
-      std::vector<float> patch = extract_7x7(buffer);
-      append_image_data_csv("../vectors/7x7_middle_patch.csv", buffer, patch);
+      // extract feature set from each image based on the argument
+      char *feature_set = argv[2];
+      std::vector<float> feature;
+
+      if (strcmp(feature_set, "7x7") == 0) {
+        feature = extract_7x7(buffer); // extract 7x7 patch in the middle and save to a vector
+      } else if (strcmp(feature_set, "histogram_matching") == 0) {
+        feature = compute_histogram(buffer); // compute 2d histogram and save to a vector
+      }
+      else {
+        std::cerr << "Error: Unknown feature set \"" << feature_set << "\"." << std::endl;
+        return -1;
+      }
+
+      // append the feature vector to a csv file
+      char final_path[256];
+      snprintf(final_path, sizeof(final_path), "../vectors/%s.csv", feature_set);
+      append_image_data_csv(final_path, buffer, feature);
     }
   }
 
