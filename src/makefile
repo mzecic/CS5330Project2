@@ -26,9 +26,12 @@ readfiles1: readfiles-1.o csv_util.o similarity_extraction.o
 	$(CC) $^ -o $(BINDIR)/$@ $(LDFLAGS) $(LDLIBS)
 	install_name_tool -add_rpath /opt/homebrew/lib $(BINDIR)/$@
 
-calculate_similarity: calculate_similarity.o csv_util.o similarity_extraction.o
+calculate_similarity: calculate_similarity.o csv_util.o similarity_extraction.o filters.o
 	$(CC) $^ -o $(BINDIR)/$@ $(LDFLAGS) $(LDLIBS)
 	install_name_tool -add_rpath /opt/homebrew/lib $(BINDIR)/$@
+
+# filters.o: filters.cpp filters.h
+# 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 %.o: %.cpp
 	$(CC) $(CXXFLAGS) -c $< -o $@

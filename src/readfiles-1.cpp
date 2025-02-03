@@ -121,6 +121,10 @@ int main(int argc, char *argv[]) {
         feature = extract_7x7(buffer); // extract 7x7 patch in the middle and save to a vector
       } else if (strcmp(feature_set, "histogram_matching") == 0) {
         feature = compute_histogram(buffer); // compute 2d histogram and save to a vector
+      } else if (strcmp(feature_set, "multi_histogram") == 0) {
+        feature = compute_multi_histogram(buffer); // compute multi-histogram and save to a vector
+      } else if (strcmp(feature_set, "texture_and_color") == 0) {
+        feature = compute_texture_and_color(buffer); // compute texture and color features and save to a vector
       }
       else {
         std::cerr << "Error: Unknown feature set \"" << feature_set << "\"." << std::endl;
