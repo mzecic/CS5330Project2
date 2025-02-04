@@ -22,3 +22,6 @@ std::vector<float> compute_multi_histogram(const char* filename, int hist_size =
 
 // Function that computes texture and color and unifies it into one vector
 std::vector<float> compute_texture_and_color(const char* filename, int hist_size = 8);
+
+// Function that detects banans using contours and a mask that captures yellow color in various range to account for different light exposure
+std::vector<float> banana_extraction(const char* filename);

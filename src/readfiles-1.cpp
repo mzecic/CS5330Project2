@@ -125,6 +125,8 @@ int main(int argc, char *argv[]) {
         feature = compute_multi_histogram(buffer); // compute multi-histogram and save to a vector
       } else if (strcmp(feature_set, "texture_and_color") == 0) {
         feature = compute_texture_and_color(buffer); // compute texture and color features and save to a vector
+      } else if (strcmp(feature_set, "banana_detection") == 0) {
+        feature = banana_extraction(buffer);
       }
       else {
         std::cerr << "Error: Unknown feature set \"" << feature_set << "\"." << std::endl;

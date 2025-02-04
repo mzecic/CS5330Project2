@@ -209,6 +209,27 @@ std::vector<float> compute_multi_histogram(const char* filename, int hist_size =
 }
 
 
+/**
+ * Computes a combined feature vector of color and texture histograms for an image.
+ *
+ * @param filename The path to the image file.
+ * @param hist_size The number of bins for the histograms (default is 8).
+ * @return A vector of floats representing the concatenated color and texture histograms.
+ *
+ * The function performs the following steps:
+ * 1. Loads the image from the specified file and checks if it is empty.
+ * 2. Converts the image from BGR to RGB and grayscale color spaces.
+ * 3. Splits the RGB image into its red, green, and blue channels.
+ * 4. Initializes histograms for the color channels.
+ * 5. Computes the color histograms for the red, green, and blue channels.
+ * 6. Normalizes the color histograms by the total number of pixels.
+ * 7. Computes the Sobel gradients for the grayscale image to obtain gradient magnitudes and directions.
+ * 8. Finds the maximum gradient magnitude.
+ * 9. Initializes and computes the texture histogram based on gradient magnitudes.
+ * 10. Normalizes the texture histogram by the total number of pixels.
+ * 11. Combines the color and texture histograms into a single feature vector.
+ * 12. Returns the combined feature vector.
+ */
 std::vector<float> compute_texture_and_color(const char* filename, int hist_size = 8) {
     cv::Mat image = cv::imread(filename);
     if (image.empty()) {
@@ -286,6 +307,105 @@ std::vector<float> compute_texture_and_color(const char* filename, int hist_size
     std::vector<float> feature_vector;
     feature_vector.insert(feature_vector.end(), histogram.begin(), histogram.end());
     feature_vector.insert(feature_vector.end(), texture_histogram.begin(), texture_histogram.end());
+
+    return feature_vector;
+}
+
+std::vector<float> banana_extraction(const char* filename) {
+    cv::Mat image = cv::imread(filename);
+    if (image.empty()) {
+        printf("Error: Could not load image %s\n", filename);
+        return {};
+    }
+
+    cv::Mat hsv, mask;
+    cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
+
+    // Refined banana color range (avoiding weak yellows)
+    cv::Scalar lower_yellow(22, 90, 120);
+    cv::Scalar upper_yellow(35, 255, 255);
+    cv::inRange(hsv, lower_yellow, upper_yellow, mask);
+
+    // Morphological processing to remove noise
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, cv::Mat::ones(3,3,CV_8U));
+    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, cv::Mat::ones(5,5,CV_8U));
+
+    // Edge filtering to remove false positives
+    cv::Mat edges;
+    cv::Canny(image, edges, 50, 150);
+    mask = mask & ~edges; // Remove strong edge areas (like hydrants)
+
+    // Find contours
+    std::vector<std::vector<cv::Point>> contours;
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    float total_area = 0.0f;
+    float largest_aspect_ratio = 0.0f;
+    std::vector<double> hu_moments(7, 0.0);
+    cv::Scalar mean_hsv = cv::mean(hsv, mask);
+    int num_contours = 0;
+
+    for (const auto& contour : contours) {
+        float area = cv::contourArea(contour);
+
+        // Ignore small objects
+        if (area < 800.0) continue;
+
+        total_area += area;
+        num_contours++;
+
+        if (contour.size() >= 5) {
+            cv::RotatedRect ellipse_fit = cv::fitEllipse(contour);
+            float min_dim = std::max(ellipse_fit.size.width, ellipse_fit.size.height);
+            float max_dim = std::max(1.0f, min_dim);  // Avoid division by zero
+            float aspect_ratio = max_dim / min_dim;
+
+            // Ignore non-elongated objects (e.g., hydrants)
+            if (aspect_ratio < 3) continue;
+
+            largest_aspect_ratio = std::max(largest_aspect_ratio, aspect_ratio);
+        }
+
+        // Calculate Hu Moments
+        cv::Moments moments = cv::moments(contour);
+        if (moments.m00 > 0) {
+            cv::HuMoments(moments, hu_moments.data());
+        }
+    }
+
+    // Apply log transformation to Hu Moments
+    for (int i = 0; i < 7; i++) {
+        hu_moments[i] = -1.0f * std::signbit(hu_moments[i]) * log10(std::abs(hu_moments[i]) + 1e-6f);
+    }
+
+    // Normalize values
+    total_area = std::min(total_area / 10000.0f, 1.0f);
+    largest_aspect_ratio = std::min(largest_aspect_ratio / 10.0f, 1.0f);
+    float norm_num_contours = std::min(num_contours / 10.0f, 1.0f);
+
+    // Handle case where no valid banana-like objects are found
+    if (num_contours == 0) {
+        printf("Warning: No banana-like contours detected in %s\n", filename);
+        return { 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.5f, 0.5f, 0.5f, 0.01f };
+    }
+
+    // Feature vector
+    std::vector<float> feature_vector = {
+        total_area,
+        largest_aspect_ratio,
+        static_cast<float>(hu_moments[0]),
+        static_cast<float>(hu_moments[1]),
+        static_cast<float>(hu_moments[2]),
+        static_cast<float>(hu_moments[3]),
+        static_cast<float>(hu_moments[4]),
+        static_cast<float>(hu_moments[5]),
+        static_cast<float>(hu_moments[6]),
+        static_cast<float>(mean_hsv[0] / 180.0f),
+        static_cast<float>(mean_hsv[1] / 255.0f),
+        static_cast<float>(mean_hsv[2] / 255.0f),
+        norm_num_contours
+    };
 
     return feature_vector;
 }
