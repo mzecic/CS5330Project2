@@ -311,86 +311,128 @@ std::vector<float> compute_texture_and_color(const char* filename, int hist_size
     return feature_vector;
 }
 
+/**
+ * Extracts features from an image to identify banana-like objects.
+ *
+ * @param filename The path to the image file.
+ * @return A vector of floats representing the extracted features.
+ *
+ * The function performs the following steps:
+ * 1. Loads the image from the specified file and checks if it is empty.
+ * 2. Converts the image to HSV color space and thresholds for yellow color to create a mask.
+ * 3. Applies morphological operations to reduce noise in the mask.
+ * 4. Finds contours in the mask.
+ * 5. Initializes feature values including total area, largest aspect ratio, Hu moments, mean HSV, and number of contours.
+ * 6. Processes each contour to compute area, aspect ratio, and convexity defects.
+ * 7. Computes Hu moments for valid contours.
+ * 8. Computes texture score using the Laplacian variance.
+ * 9. Applies a log transformation to the Hu moments while preserving their sign.
+ * 10. Normalizes the features.
+ * 11. If no valid banana-like contours are found, returns a default feature vector.
+ * 12. Constructs and returns the feature vector.
+ */
 std::vector<float> banana_extraction(const char* filename) {
+    // Load the image
     cv::Mat image = cv::imread(filename);
     if (image.empty()) {
         printf("Error: Could not load image %s\n", filename);
         return {};
     }
 
+    // Convert to HSV and threshold for yellow (banana) color
     cv::Mat hsv, mask;
     cv::cvtColor(image, hsv, cv::COLOR_BGR2HSV);
-
-    // Refined banana color range (avoiding weak yellows)
-    cv::Scalar lower_yellow(22, 90, 120);
-    cv::Scalar upper_yellow(35, 255, 255);
+    cv::Scalar lower_yellow(20, 110, 90);
+    cv::Scalar upper_yellow(40, 255, 255);
     cv::inRange(hsv, lower_yellow, upper_yellow, mask);
 
-    // Morphological processing to remove noise
-    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, cv::Mat::ones(3,3,CV_8U));
-    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, cv::Mat::ones(5,5,CV_8U));
+    // Apply morphological operations to reduce noise
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, cv::Mat::ones(5, 5, CV_8U));
+    cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, cv::Mat::ones(7, 7, CV_8U));
 
-    // Edge filtering to remove false positives
-    cv::Mat edges;
-    cv::Canny(image, edges, 50, 150);
-    mask = mask & ~edges; // Remove strong edge areas (like hydrants)
-
-    // Find contours
+    // Find contours in the mask
     std::vector<std::vector<cv::Point>> contours;
     std::vector<cv::Vec4i> hierarchy;
     cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
+    // Initialize feature values
     float total_area = 0.0f;
     float largest_aspect_ratio = 0.0f;
     std::vector<double> hu_moments(7, 0.0);
     cv::Scalar mean_hsv = cv::mean(hsv, mask);
     int num_contours = 0;
 
+    // Process each contour
     for (const auto& contour : contours) {
         float area = cv::contourArea(contour);
 
-        // Ignore small objects
-        if (area < 800.0) continue;
+        // Discard small contours (noise)
+        if (area < 1200.0f)
+            continue;
+
+        // Use a rotated rectangle to obtain a more robust aspect ratio (handles rotation)
+        cv::RotatedRect rotated_rect = cv::minAreaRect(contour);
+        float width = rotated_rect.size.width;
+        float height = rotated_rect.size.height;
+        if (height == 0) height = 1;  // avoid division by zero
+
+        // Compute aspect ratio as the ratio of the larger to the smaller side
+        float aspect_ratio = (width > height) ? width / height : height / width;
+
+        // Only consider contours with aspect ratios typical of a banana
+        if (aspect_ratio < 1.5 || aspect_ratio > 7)
+            continue;
 
         total_area += area;
         num_contours++;
+        largest_aspect_ratio = std::max(largest_aspect_ratio, aspect_ratio);
 
-        if (contour.size() >= 5) {
-            cv::RotatedRect ellipse_fit = cv::fitEllipse(contour);
-            float min_dim = std::max(ellipse_fit.size.width, ellipse_fit.size.height);
-            float max_dim = std::max(1.0f, min_dim);  // Avoid division by zero
-            float aspect_ratio = max_dim / min_dim;
-
-            // Ignore non-elongated objects (e.g., hydrants)
-            if (aspect_ratio < 3) continue;
-
-            largest_aspect_ratio = std::max(largest_aspect_ratio, aspect_ratio);
+        // Check for convexity defects (bananas should have a relatively smooth outline)
+        std::vector<int> hull;
+        cv::convexHull(contour, hull, false, false);
+        if (hull.size() > 3) {
+            std::vector<cv::Vec4i> defects;
+            cv::convexityDefects(contour, hull, defects);
+            if (defects.size() > 3)
+                continue;  // Skip contours with many defects
         }
 
-        // Calculate Hu Moments
+        // Compute Hu Moments from the contour's moments
         cv::Moments moments = cv::moments(contour);
         if (moments.m00 > 0) {
-            cv::HuMoments(moments, hu_moments.data());
+            std::vector<double> tempHu(7, 0.0);
+            cv::HuMoments(moments, tempHu.data());
+            hu_moments = tempHu;  // In this example, we simply take the last valid contour's Hu Moments.
         }
     }
 
-    // Apply log transformation to Hu Moments
+    // Compute texture score using the Laplacian variance
+    cv::Mat gray, laplacian;
+    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    cv::Laplacian(gray, laplacian, CV_64F);
+    cv::Scalar mean_lap, stddev_lap;
+    cv::meanStdDev(laplacian, mean_lap, stddev_lap);
+    float texture_score = std::min(static_cast<float>(stddev_lap[0]) / 100.0f, 1.0f);
+
+    // Apply a log transformation to the Hu Moments while preserving their sign
     for (int i = 0; i < 7; i++) {
-        hu_moments[i] = -1.0f * std::signbit(hu_moments[i]) * log10(std::abs(hu_moments[i]) + 1e-6f);
+        double sign = (hu_moments[i] < 0) ? -1.0 : 1.0;
+        hu_moments[i] = -sign * log10(std::abs(hu_moments[i]) + 1e-6);
     }
 
-    // Normalize values
-    total_area = std::min(total_area / 10000.0f, 1.0f);
+    // Normalize the features
+    total_area = std::min(total_area / 50000.0f, 1.0f);
     largest_aspect_ratio = std::min(largest_aspect_ratio / 10.0f, 1.0f);
     float norm_num_contours = std::min(num_contours / 10.0f, 1.0f);
 
-    // Handle case where no valid banana-like objects are found
+    // If no valid banana-like contours are found, return a default feature vector (14 elements)
     if (num_contours == 0) {
         printf("Warning: No banana-like contours detected in %s\n", filename);
-        return { 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.5f, 0.5f, 0.5f, 0.01f };
+        return { 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f, 0.01f,
+                 0.5f, 0.5f, 0.5f, 0.01f, 0.01f };
     }
 
-    // Feature vector
+    // Construct the feature vector
     std::vector<float> feature_vector = {
         total_area,
         largest_aspect_ratio,
@@ -404,7 +446,8 @@ std::vector<float> banana_extraction(const char* filename) {
         static_cast<float>(mean_hsv[0] / 180.0f),
         static_cast<float>(mean_hsv[1] / 255.0f),
         static_cast<float>(mean_hsv[2] / 255.0f),
-        norm_num_contours
+        norm_num_contours,
+        texture_score
     };
 
     return feature_vector;
